@@ -268,13 +268,36 @@ async def generate_videos(request: VideoGenerationRequest, req: Request):
     # 更新统计信息
     update_user_statistics(session_id, request.api_key, client_ip, "request")
     
-    # 为每张图片创建任务
-    for i, image_data in enumerate(request.images):
+    # 处理任务创建逻辑
+    if request.images and len(request.images) > 0:
+        # 有图片的情况：为每张图片创建任务
+        for i, image_data in enumerate(request.images):
+            for j in range(request.videos_per_image):
+                task_id = str(uuid.uuid4())
+                task = TaskStatus(
+                    task_id=task_id,
+                    status="preparing",
+                    message="准备生成视频...",
+                    created_at=time.time(),
+                    updated_at=time.time()
+                )
+                
+                tasks_storage[task_id] = task.model_dump()
+                tasks.append(task_id)
+                
+                # 异步开始生成视频
+                asyncio.create_task(
+                    process_video_generation(
+                        task_id, request, image_data, session_id
+                    )
+                )
+    else:
+        # 只有提示词没有图片的情况：创建纯文本视频生成任务
         for j in range(request.videos_per_image):
             task_id = str(uuid.uuid4())
             task = TaskStatus(
                 task_id=task_id,
-                status="preparing",
+                status="preparing", 
                 message="准备生成视频...",
                 created_at=time.time(),
                 updated_at=time.time()
@@ -283,10 +306,10 @@ async def generate_videos(request: VideoGenerationRequest, req: Request):
             tasks_storage[task_id] = task.model_dump()
             tasks.append(task_id)
             
-            # 异步开始生成视频
+            # 异步开始生成视频（无图片）
             asyncio.create_task(
                 process_video_generation(
-                    task_id, request, image_data, session_id
+                    task_id, request, None, session_id
                 )
             )
     
@@ -529,7 +552,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         manager.disconnect(session_id)
 
 async def process_video_generation(task_id: str, request: VideoGenerationRequest, 
-                                 image_data: str, session_id: str):
+                                 image_data: Optional[str], session_id: str):
     """处理单个视频生成任务"""
     try:
         # 更新任务状态
@@ -537,36 +560,38 @@ async def process_video_generation(task_id: str, request: VideoGenerationRequest
         
         # 准备API请求数据
         if request.model == 'S2V-01':
-            # S2V-01模型使用subject_reference参数
+            # S2V-01模型使用subject_reference参数（必须有图片+提示词）
             payload = {
                 "model": request.model,
                 "prompt": request.prompt,
                 "prompt_optimizer": request.prompt_optimizer,
-                "duration": request.duration,
                 "subject_reference": [{
                     "type": "character",
                     "image": [image_data]
                 }]
             }
+            # S2V-01不支持duration和resolution参数
         else:
-            # 其他模型使用first_frame_image参数
+            # MiniMax-Hailuo-02模型
             payload = {
                 "prompt": request.prompt,
                 "model": request.model,
-                "first_frame_image": image_data,
                 "duration": request.duration,
                 "prompt_optimizer": request.prompt_optimizer
             }
             
+            # 如果有图片，添加first_frame_image参数
+            if image_data:
+                payload["first_frame_image"] = image_data
+                
             if request.watermark:
                 payload["watermark"] = "hailuo"
                 
             # MiniMax-Hailuo-02支持分辨率设置
-            if request.model == "MiniMax-Hailuo-02":
-                if request.duration == 6:
-                    payload["resolution"] = request.resolution
-                else:
-                    payload["resolution"] = "768P"
+            if request.duration == 6:
+                payload["resolution"] = request.resolution
+            else:
+                payload["resolution"] = "768P"
         
         # 发送生成请求
         async with httpx.AsyncClient(timeout=30) as client:

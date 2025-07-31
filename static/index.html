@@ -100,25 +100,20 @@
                     
                     <!-- 图片上传 -->
                     <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">上传图片</label>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">上传图片 <span class="text-xs text-gray-500">(可选)</span></label>
                         <input type="file" id="imageUpload" accept="image/*" multiple
                                class="w-full mt-2 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                         <div class="text-xs text-gray-500 mt-1">
-                            支持选择单张或多张图片，可按住Ctrl/Cmd多选
+                            支持选择单张或多张图片，可按住Ctrl/Cmd多选。MiniMax-Hailuo-02支持有图/无图，S2V-01需要图片+提示词
                         </div>
                     </div>
                     
                     <!-- 模型选择 -->
                     <div class="mb-4">
                         <label class="block text-sm font-medium text-gray-700 mb-2">模型选择</label>
-                        <select id="model" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="MiniMax-Hailuo-02" selected>MiniMax-Hailuo-02</option>
-                            <option value="I2V-01">I2V-01</option>
-                            <option value="I2V-01-Director">I2V-01-Director</option>
-                            <option value="I2V-01-live">I2V-01-live</option>
-                            <option value="T2V-01">T2V-01</option>
-                            <option value="T2V-01-Director">T2V-01-Director</option>
-                            <option value="S2V-01">S2V-01</option>
+                        <select id="model" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="handleModelChange()">
+                            <option value="MiniMax-Hailuo-02" selected>MiniMax-Hailuo-02 (支持有图/无图)</option>
+                            <option value="S2V-01">S2V-01 (需要图片+提示词)</option>
                         </select>
                     </div>
                     
@@ -140,7 +135,7 @@
                                    class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                         </div>
                         
-                        <div>
+                        <div id="durationGroup">
                             <label class="block text-sm font-medium text-gray-700 mb-1">视频时长(秒)</label>
                             <select id="duration" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="6" selected>6秒</option>
@@ -202,7 +197,7 @@
             document.getElementById('imageUpload').addEventListener('change', handleFileUpload);
             
             // 模型和时长变化事件
-            document.getElementById('model').addEventListener('change', updateResolutionOptions);
+            document.getElementById('model').addEventListener('change', handleModelChange);
             document.getElementById('duration').addEventListener('change', updateResolutionOptions);
         }
 
@@ -210,10 +205,14 @@
             const model = document.getElementById('model').value;
             const duration = parseInt(document.getElementById('duration').value);
             const resolutionGroup = document.getElementById('resolutionGroup');
+            const durationGroup = document.getElementById('durationGroup');
             const resolutionSelect = document.getElementById('resolution');
             
             if (model === 'MiniMax-Hailuo-02') {
+                // MiniMax-Hailuo-02显示时长和分辨率选项
                 resolutionGroup.style.display = 'block';
+                durationGroup.style.display = 'block';
+                
                 // 10秒时只能选择768P
                 const option1080P = resolutionSelect.querySelector('option[value="1080P"]');
                 if (duration === 10) {
@@ -223,8 +222,14 @@
                     option1080P.disabled = false;
                 }
             } else {
+                // S2V-01隐藏时长和分辨率选项
                 resolutionGroup.style.display = 'none';
+                durationGroup.style.display = 'none';
             }
+        }
+        
+        function handleModelChange() {
+            updateResolutionOptions();
         }
 
         async function handleFileUpload(event) {
@@ -298,20 +303,30 @@
             // 验证输入
             const apiKey = document.getElementById('apiKey').value.trim();
             const prompt = document.getElementById('prompt').value.trim();
+            const model = document.getElementById('model').value;
             
             if (!apiKey) {
                 alert('请输入API Key');
                 return;
             }
             
-            if (!prompt) {
-                alert('请输入提示词');
-                return;
-            }
-            
-            if (uploadedImages.length === 0) {
-                alert('请先上传图片');
-                return;
+            // 根据模型验证输入
+            if (model === 'S2V-01') {
+                // S2V-01需要图片+提示词
+                if (!prompt) {
+                    alert('S2V-01模型需要输入提示词');
+                    return;
+                }
+                if (uploadedImages.length === 0) {
+                    alert('S2V-01模型需要上传图片');
+                    return;
+                }
+            } else {
+                // MiniMax-Hailuo-02至少需要提示词或图片之一
+                if (!prompt && uploadedImages.length === 0) {
+                    alert('请至少输入提示词或上传图片');
+                    return;
+                }
             }
 
             // 禁用生成按钮
@@ -331,7 +346,7 @@
                     videos_per_image: parseInt(document.getElementById('videosPerImage').value),
                     duration: parseInt(document.getElementById('duration').value),
                     resolution: document.getElementById('resolution').value,
-                    images: uploadedImages.map(img => img.data_url)
+                    images: uploadedImages.length > 0 ? uploadedImages.map(img => img.data_url) : []
                 };
 
                 // 发送生成请求
@@ -402,9 +417,55 @@
             container.innerHTML = '';
             
             let taskIndex = 0;
-            uploadedImages.forEach((image, imageIndex) => {
-                const videosPerImage = parseInt(document.getElementById('videosPerImage').value);
-                
+            const videosPerImage = parseInt(document.getElementById('videosPerImage').value);
+            
+            if (uploadedImages.length > 0) {
+                // 有图片的情况
+                uploadedImages.forEach((image, imageIndex) => {
+                    for (let videoIndex = 0; videoIndex < videosPerImage; videoIndex++) {
+                        const taskId = currentTasks[taskIndex];
+                        const taskDiv = document.createElement('div');
+                        taskDiv.className = 'bg-white rounded-lg shadow-md p-4 task-item';
+                        taskDiv.id = `task-${taskId}`;
+                        
+                        taskDiv.innerHTML = `
+                            <div class="flex gap-4">
+                                <div class="flex-shrink-0">
+                                    <img src="${image.data_url}" alt="${image.filename}" class="image-preview rounded-md object-cover">
+                                    <div class="text-xs text-gray-500 mt-1">
+                                        <div>${image.filename}</div>
+                                        <div>视频 ${videoIndex + 1}/${videosPerImage}</div>
+                                    </div>
+                                </div>
+                                <div class="flex-1">
+                                    <div class="flex justify-between items-start mb-2">
+                                        <h3 class="font-medium text-gray-900">任务 ${taskIndex + 1}</h3>
+                                        <span class="text-xs text-gray-400" id="trace-${taskId}"></span>
+                                    </div>
+                                    
+                                    <div id="status-${taskId}" class="mb-3">
+                                        <span class="status-dot status-preparing"></span>
+                                        <span class="text-sm">准备中...</span>
+                                    </div>
+                                    
+                                    <div id="log-${taskId}" class="log-content bg-gray-50 p-2 rounded text-xs text-gray-600 mb-3" style="display: none;">
+                                    </div>
+                                    
+                                    <div id="result-${taskId}" class="hidden">
+                                        <video controls class="video-preview rounded-md">
+                                            您的浏览器不支持视频播放
+                                        </video>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        
+                        container.appendChild(taskDiv);
+                        taskIndex++;
+                    }
+                });
+            } else {
+                // 没有图片的情况，只使用提示词
                 for (let videoIndex = 0; videoIndex < videosPerImage; videoIndex++) {
                     const taskId = currentTasks[taskIndex];
                     const taskDiv = document.createElement('div');
@@ -414,9 +475,13 @@
                     taskDiv.innerHTML = `
                         <div class="flex gap-4">
                             <div class="flex-shrink-0">
-                                <img src="${image.data_url}" alt="${image.filename}" class="image-preview rounded-md object-cover">
+                                <div class="image-preview rounded-md object-cover bg-gray-100 flex items-center justify-center" style="width: 150px; height: 150px;">
+                                    <div class="text-center text-gray-500">
+                                        <div class="text-2xl mb-2">📝</div>
+                                        <div class="text-xs">文本生成视频</div>
+                                    </div>
+                                </div>
                                 <div class="text-xs text-gray-500 mt-1">
-                                    <div>${image.filename}</div>
                                     <div>视频 ${videoIndex + 1}/${videosPerImage}</div>
                                 </div>
                             </div>
@@ -446,7 +511,7 @@
                     container.appendChild(taskDiv);
                     taskIndex++;
                 }
-            });
+            }
         }
 
         function updateTaskStatus(taskId, taskData) {
