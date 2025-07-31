@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  minimax-video-tool:
+    build: .
+    ports:
+      - "5211:5211"
+    volumes:
+      - ./uploads:/app/uploads
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    
+    # 可选：如果需要持久化上传文件
+    # volumes:
+    #   - ./data/uploads:/app/uploads

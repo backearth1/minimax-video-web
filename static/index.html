@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MiniMax Video Generation Tool</title>
+    <link rel="icon" type="image/png" href="/static/mm_logo.png">
+    <link rel="shortcut icon" type="image/png" href="/static/mm_logo.png">
+    <link rel="apple-touch-icon" href="/static/mm_logo.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-preparing { background-color: #fbbf24; }
+        .status-queueing { background-color: #3b82f6; }
+        .status-processing { background-color: #8b5cf6; }
+        .status-success { background-color: #10b981; }
+        .status-fail { background-color: #ef4444; }
+        
+        .task-item {
+            transition: all 0.3s ease;
+        }
+        
+        .log-content {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        
+        .image-preview {
+            max-width: 150px;
+            max-height: 150px;
+        }
+        
+        .video-preview {
+            max-width: 100%;
+            max-height: 300px;
+        }
+        
+        .disclaimer {
+            font-size: 10px;
+            color: #888;
+            background-color: #f8f9fa;
+            padding: 8px;
+            border-radius: 4px;
+            margin-top: 15px;
+            line-height: 1.4;
+            border: 1px solid #e9ecef;
+        }
+        
+        .disclaimer a {
+            color: #4f46e5;
+            text-decoration: none;
+        }
+        
+        .disclaimer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-6">
+        <h1 class="text-3xl font-bold text-gray-900 mb-8 text-center">
+            🎬 MiniMax Video Generation Tool
+        </h1>
+        
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 左侧参数输入区 -->
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-lg shadow-md p-6 sticky top-6">
+                    <h2 class="text-xl font-semibold mb-4">生成参数</h2>
+                    
+                    <!-- API设置 -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">API URL</label>
+                        <select id="apiUrl" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="https://api.minimaxi.com/v1">国内 (minimaxi.com)</option>
+                            <option value="https://api.minimax.io/v1">海外 (minimax.io)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">API Key</label>
+                        <input type="password" id="apiKey" placeholder="请输入API Key" 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    
+                    <!-- 提示词 -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">提示词</label>
+                        <textarea id="prompt" rows="3" placeholder="描述您想要生成的视频内容..."
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                    </div>
+                    
+                    <!-- 图片上传 -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">上传图片</label>
+                        <input type="file" id="imageUpload" accept="image/*" multiple
+                               class="w-full mt-2 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <div class="text-xs text-gray-500 mt-1">
+                            支持选择单张或多张图片，可按住Ctrl/Cmd多选
+                        </div>
+                    </div>
+                    
+                    <!-- 模型选择 -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">模型选择</label>
+                        <select id="model" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="MiniMax-Hailuo-02" selected>MiniMax-Hailuo-02</option>
+                            <option value="I2V-01">I2V-01</option>
+                            <option value="I2V-01-Director">I2V-01-Director</option>
+                            <option value="I2V-01-live">I2V-01-live</option>
+                            <option value="T2V-01">T2V-01</option>
+                            <option value="T2V-01-Director">T2V-01-Director</option>
+                            <option value="S2V-01">S2V-01</option>
+                        </select>
+                    </div>
+                    
+                    <!-- 其他设置 -->
+                    <div class="space-y-3">
+                        <div class="flex items-center">
+                            <input type="checkbox" id="promptOptimizer" checked class="mr-2">
+                            <label class="text-sm text-gray-700">提示词优化</label>
+                        </div>
+                        
+                        <div class="flex items-center">
+                            <input type="checkbox" id="watermark" checked class="mr-2">
+                            <label class="text-sm text-gray-700">开启水印</label>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">每张图片生成视频数</label>
+                            <input type="number" id="videosPerImage" value="1" min="1" max="5"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">视频时长(秒)</label>
+                            <select id="duration" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="6" selected>6秒</option>
+                                <option value="10">10秒</option>
+                            </select>
+                        </div>
+                        
+                        <div id="resolutionGroup">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">分辨率</label>
+                            <select id="resolution" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="768P" selected>768P</option>
+                                <option value="1080P">1080P</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- 生成按钮 -->
+                    <button id="generateBtn" onclick="startGeneration()" 
+                            class="w-full mt-6 bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                        开始生成视频
+                    </button>
+                    
+                    <!-- 状态显示 -->
+                    <div id="globalStatus" class="mt-4 p-3 rounded-md bg-gray-100 text-sm text-gray-600 hidden"></div>
+                    
+                    <!-- 用户提示免责声明 -->
+                    <div class="disclaimer">
+                        本网页仅用于测试体验，请勿用于生产系统，不定期限流或维护，长期使用可下载开源代码，自行部署<a href="https://github.com/backearth1/minimax-video-web.git" target="_blank" rel="noopener noreferrer">https://github.com/backearth1/minimax-video-web.git</a>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右侧预览和日志区 -->
+            <div class="lg:col-span-2">
+                <div id="tasksContainer" class="space-y-4">
+                    <div class="text-center text-gray-500 py-12">
+                        <p class="text-lg">选择图片后，这里将显示生成任务的进度和结果</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let uploadedImages = [];
+        let websocket = null;
+        let sessionId = null;
+        let currentTasks = [];
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            setupEventListeners();
+            updateResolutionOptions();
+        });
+
+        function setupEventListeners() {
+            // 文件上传事件
+            document.getElementById('imageUpload').addEventListener('change', handleFileUpload);
+            
+            // 模型和时长变化事件
+            document.getElementById('model').addEventListener('change', updateResolutionOptions);
+            document.getElementById('duration').addEventListener('change', updateResolutionOptions);
+        }
+
+        function updateResolutionOptions() {
+            const model = document.getElementById('model').value;
+            const duration = parseInt(document.getElementById('duration').value);
+            const resolutionGroup = document.getElementById('resolutionGroup');
+            const resolutionSelect = document.getElementById('resolution');
+            
+            if (model === 'MiniMax-Hailuo-02') {
+                resolutionGroup.style.display = 'block';
+                // 10秒时只能选择768P
+                const option1080P = resolutionSelect.querySelector('option[value="1080P"]');
+                if (duration === 10) {
+                    option1080P.disabled = true;
+                    resolutionSelect.value = '768P';
+                } else {
+                    option1080P.disabled = false;
+                }
+            } else {
+                resolutionGroup.style.display = 'none';
+            }
+        }
+
+        async function handleFileUpload(event) {
+            const files = Array.from(event.target.files);
+            const imageFiles = files.filter(file => file.type.startsWith('image/'));
+            
+            if (imageFiles.length === 0) {
+                alert('请选择图片文件');
+                return;
+            }
+
+            showGlobalStatus('正在上传图片...', 'info');
+            
+            try {
+                const formData = new FormData();
+                imageFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    uploadedImages = data.files;
+                    updateImagePreview();
+                    showGlobalStatus(`成功上传 ${imageFiles.length} 张图片`, 'success');
+                } else {
+                    throw new Error('上传失败');
+                }
+            } catch (error) {
+                console.error('上传错误:', error);
+                showGlobalStatus('上传失败: ' + error.message, 'error');
+            }
+        }
+
+        function updateImagePreview() {
+            const container = document.getElementById('tasksContainer');
+            container.innerHTML = '';
+            
+            uploadedImages.forEach((image, index) => {
+                const taskDiv = document.createElement('div');
+                taskDiv.className = 'bg-white rounded-lg shadow-md p-4 task-item';
+                taskDiv.id = `task-preview-${index}`;
+                
+                taskDiv.innerHTML = `
+                    <div class="flex gap-4">
+                        <div class="flex-shrink-0">
+                            <img src="${image.data_url}" alt="${image.filename}" class="image-preview rounded-md object-cover">
+                            <div class="text-xs text-gray-500 mt-1">
+                                <div>${image.filename}</div>
+                                <div>${(image.size / 1024 / 1024).toFixed(2)} MB</div>
+                            </div>
+                        </div>
+                        <div class="flex-1">
+                            <h3 class="font-medium text-gray-900">图片 ${index + 1}</h3>
+                            <div class="text-sm text-gray-500 mb-2">等待生成...</div>
+                            <div id="task-status-${index}" class="text-sm text-gray-400">点击"开始生成视频"开始处理</div>
+                        </div>
+                    </div>
+                `;
+                
+                container.appendChild(taskDiv);
+            });
+        }
+
+        async function startGeneration() {
+            // 验证输入
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const prompt = document.getElementById('prompt').value.trim();
+            
+            if (!apiKey) {
+                alert('请输入API Key');
+                return;
+            }
+            
+            if (!prompt) {
+                alert('请输入提示词');
+                return;
+            }
+            
+            if (uploadedImages.length === 0) {
+                alert('请先上传图片');
+                return;
+            }
+
+            // 禁用生成按钮
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.disabled = true;
+            generateBtn.textContent = '生成中...';
+
+            try {
+                // 准备请求数据
+                const requestData = {
+                    api_url: document.getElementById('apiUrl').value,
+                    api_key: apiKey,
+                    prompt: prompt,
+                    model: document.getElementById('model').value,
+                    prompt_optimizer: document.getElementById('promptOptimizer').checked,
+                    watermark: document.getElementById('watermark').checked,
+                    videos_per_image: parseInt(document.getElementById('videosPerImage').value),
+                    duration: parseInt(document.getElementById('duration').value),
+                    resolution: document.getElementById('resolution').value,
+                    images: uploadedImages.map(img => img.data_url)
+                };
+
+                // 发送生成请求
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestData)
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    sessionId = data.session_id;
+                    currentTasks = data.task_ids;
+                    
+                    // 建立WebSocket连接
+                    connectWebSocket();
+                    
+                    // 更新UI显示任务
+                    updateTasksUI();
+                    
+                    showGlobalStatus(`开始生成 ${currentTasks.length} 个视频任务`, 'info');
+                } else {
+                    throw new Error('生成请求失败');
+                }
+            } catch (error) {
+                console.error('生成错误:', error);
+                showGlobalStatus('生成失败: ' + error.message, 'error');
+                generateBtn.disabled = false;
+                generateBtn.textContent = '开始生成视频';
+            }
+        }
+
+        function connectWebSocket() {
+            if (websocket) {
+                websocket.close();
+            }
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/${sessionId}`;
+            
+            websocket = new WebSocket(wsUrl);
+            
+            websocket.onopen = function() {
+                console.log('WebSocket连接已建立');
+            };
+            
+            websocket.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                if (message.type === 'task_update') {
+                    updateTaskStatus(message.task_id, message.data);
+                }
+            };
+            
+            websocket.onclose = function() {
+                console.log('WebSocket连接已关闭');
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket错误:', error);
+            };
+        }
+
+        function updateTasksUI() {
+            const container = document.getElementById('tasksContainer');
+            container.innerHTML = '';
+            
+            let taskIndex = 0;
+            uploadedImages.forEach((image, imageIndex) => {
+                const videosPerImage = parseInt(document.getElementById('videosPerImage').value);
+                
+                for (let videoIndex = 0; videoIndex < videosPerImage; videoIndex++) {
+                    const taskId = currentTasks[taskIndex];
+                    const taskDiv = document.createElement('div');
+                    taskDiv.className = 'bg-white rounded-lg shadow-md p-4 task-item';
+                    taskDiv.id = `task-${taskId}`;
+                    
+                    taskDiv.innerHTML = `
+                        <div class="flex gap-4">
+                            <div class="flex-shrink-0">
+                                <img src="${image.data_url}" alt="${image.filename}" class="image-preview rounded-md object-cover">
+                                <div class="text-xs text-gray-500 mt-1">
+                                    <div>${image.filename}</div>
+                                    <div>视频 ${videoIndex + 1}/${videosPerImage}</div>
+                                </div>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-start mb-2">
+                                    <h3 class="font-medium text-gray-900">任务 ${taskIndex + 1}</h3>
+                                    <span class="text-xs text-gray-400" id="trace-${taskId}"></span>
+                                </div>
+                                
+                                <div id="status-${taskId}" class="mb-3">
+                                    <span class="status-dot status-preparing"></span>
+                                    <span class="text-sm">准备中...</span>
+                                </div>
+                                
+                                <div id="log-${taskId}" class="log-content bg-gray-50 p-2 rounded text-xs text-gray-600 mb-3" style="display: none;">
+                                </div>
+                                
+                                <div id="result-${taskId}" class="hidden">
+                                    <video controls class="video-preview rounded-md">
+                                        您的浏览器不支持视频播放
+                                    </video>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    container.appendChild(taskDiv);
+                    taskIndex++;
+                }
+            });
+        }
+
+        function updateTaskStatus(taskId, taskData) {
+            const statusElement = document.getElementById(`status-${taskId}`);
+            const logElement = document.getElementById(`log-${taskId}`);
+            const resultElement = document.getElementById(`result-${taskId}`);
+            const traceElement = document.getElementById(`trace-${taskId}`);
+            
+            if (!statusElement) return;
+            
+            // 更新状态
+            const statusClass = `status-${taskData.status}`;
+            statusElement.innerHTML = `
+                <span class="status-dot ${statusClass}"></span>
+                <span class="text-sm">${taskData.message}</span>
+            `;
+            
+            // 更新Trace ID
+            if (taskData.trace_id && traceElement) {
+                traceElement.textContent = `Trace: ${taskData.trace_id}`;
+            }
+            
+            // 显示日志
+            if (logElement) {
+                logElement.style.display = 'block';
+                logElement.textContent = `状态: ${taskData.status}\n消息: ${taskData.message}\n时间: ${new Date(taskData.updated_at * 1000).toLocaleString()}`;
+                if (taskData.trace_id) {
+                    logElement.textContent += `\nTrace ID: ${taskData.trace_id}`;
+                }
+            }
+            
+            // 显示结果
+            if (taskData.status === 'success' && taskData.video_url && resultElement) {
+                const video = resultElement.querySelector('video');
+                
+                video.src = taskData.video_url;
+                video.setAttribute('download', `video_${taskId}.mp4`);
+                
+                resultElement.classList.remove('hidden');
+            }
+            
+            // 检查是否所有任务完成
+            checkAllTasksCompleted();
+        }
+
+        function checkAllTasksCompleted() {
+            const completedTasks = currentTasks.filter(taskId => {
+                const statusElement = document.getElementById(`status-${taskId}`);
+                if (!statusElement) return false;
+                
+                const statusText = statusElement.textContent.toLowerCase();
+                return statusText.includes('成功') || statusText.includes('失败');
+            });
+            
+            if (completedTasks.length === currentTasks.length && currentTasks.length > 0) {
+                const generateBtn = document.getElementById('generateBtn');
+                generateBtn.disabled = false;
+                generateBtn.textContent = '开始生成视频';
+                
+                showGlobalStatus('所有任务已完成', 'success');
+                
+                if (websocket) {
+                    websocket.close();
+                    websocket = null;
+                }
+            }
+        }
+
+        function showGlobalStatus(message, type) {
+            const statusElement = document.getElementById('globalStatus');
+            statusElement.textContent = message;
+            statusElement.className = `mt-4 p-3 rounded-md text-sm`;
+            
+            if (type === 'success') {
+                statusElement.className += ' bg-green-100 text-green-800';
+            } else if (type === 'error') {
+                statusElement.className += ' bg-red-100 text-red-800';
+            } else {
+                statusElement.className += ' bg-blue-100 text-blue-800';
+            }
+            
+            statusElement.classList.remove('hidden');
+            
+            // 3秒后自动隐藏成功消息
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusElement.classList.add('hidden');
+                }, 3000);
+            }
+        }
+    </script>
+</body>
+</html>
