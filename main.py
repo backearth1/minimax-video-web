@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MiniMax Video Generation Tool
-一个简洁的MiniMax视频生成工具，支持多人同时使用
+一个简洁的MiniMax视频生成工具，专注于视频生成功能
 """
 
 import asyncio
@@ -74,7 +74,10 @@ class VideoGenerationRequest(BaseModel):
     videos_per_image: int = 1
     duration: int = 6
     resolution: str = "768P"
+    fast_pretreatment: bool = False
     images: List[str] = []  # base64编码的图片
+
+
 
 class TaskStatus(BaseModel):
     task_id: str
@@ -268,6 +271,9 @@ async def generate_videos(request: VideoGenerationRequest, req: Request):
     # 更新统计信息
     update_user_statistics(session_id, request.api_key, client_ip, "request")
     
+    # 准备任务信息列表
+    task_info_list = []
+    
     # 处理任务创建逻辑
     if request.images and len(request.images) > 0:
         # 有图片的情况：为每张图片创建任务
@@ -276,42 +282,35 @@ async def generate_videos(request: VideoGenerationRequest, req: Request):
                 task_id = str(uuid.uuid4())
                 task = TaskStatus(
                     task_id=task_id,
-                    status="preparing",
-                    message="准备生成视频...",
+                    status="waiting",
+                    message="等待批次处理...",
                     created_at=time.time(),
                     updated_at=time.time()
                 )
                 
                 tasks_storage[task_id] = task.model_dump()
                 tasks.append(task_id)
-                
-                # 异步开始生成视频
-                asyncio.create_task(
-                    process_video_generation(
-                        task_id, request, image_data, session_id
-                    )
-                )
+                task_info_list.append((task_id, image_data))
     else:
         # 只有提示词没有图片的情况：创建纯文本视频生成任务
         for j in range(request.videos_per_image):
             task_id = str(uuid.uuid4())
             task = TaskStatus(
                 task_id=task_id,
-                status="preparing", 
-                message="准备生成视频...",
+                status="waiting", 
+                message="等待批次处理...",
                 created_at=time.time(),
                 updated_at=time.time()
             )
             
             tasks_storage[task_id] = task.model_dump()
             tasks.append(task_id)
-            
-            # 异步开始生成视频（无图片）
-            asyncio.create_task(
-                process_video_generation(
-                    task_id, request, None, session_id
-                )
-            )
+            task_info_list.append((task_id, None))
+    
+    # 分批处理任务（每5个一组）
+    asyncio.create_task(
+        process_tasks_in_batches(task_info_list, request, session_id)
+    )
     
     return JSONResponse({
         "success": True,
@@ -551,6 +550,42 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except Exception:
         manager.disconnect(session_id)
 
+
+
+async def process_tasks_in_batches(task_info_list: List[tuple], request: VideoGenerationRequest, session_id: str):
+    """分批处理视频生成任务（每5个一组）"""
+    batch_size = 5
+    total_tasks = len(task_info_list)
+    
+    # 将任务分组
+    for i in range(0, total_tasks, batch_size):
+        batch = task_info_list[i:i+batch_size]
+        current_batch = i // batch_size + 1
+        total_batches = (total_tasks + batch_size - 1) // batch_size
+        
+        print(f"处理第 {current_batch}/{total_batches} 批任务，包含 {len(batch)} 个任务")
+        
+        # 更新当前批次任务状态为准备中
+        for task_id, _ in batch:
+            await update_task_status(task_id, "preparing", f"第{current_batch}批次准备中...", session_id)
+        
+        # 并行处理当前批次的所有任务
+        batch_tasks = []
+        for task_id, image_data in batch:
+            task = asyncio.create_task(
+                process_video_generation(task_id, request, image_data, session_id)
+            )
+            batch_tasks.append(task)
+        
+        # 等待当前批次的所有任务完成
+        await asyncio.gather(*batch_tasks)
+        
+        print(f"第 {current_batch}/{total_batches} 批任务已完成")
+        
+        # 如果还有下一批，稍作等待
+        if i + batch_size < total_tasks:
+            await asyncio.sleep(2)  # 批次间间隔2秒
+
 async def process_video_generation(task_id: str, request: VideoGenerationRequest, 
                                  image_data: Optional[str], session_id: str):
     """处理单个视频生成任务"""
@@ -571,6 +606,10 @@ async def process_video_generation(task_id: str, request: VideoGenerationRequest
                 }]
             }
             # S2V-01不支持duration和resolution参数
+            
+            # 添加fast_pretreatment参数
+            if hasattr(request, 'fast_pretreatment'):
+                payload["fast_pretreatment"] = request.fast_pretreatment
         else:
             # MiniMax-Hailuo-02模型
             payload = {
@@ -592,6 +631,10 @@ async def process_video_generation(task_id: str, request: VideoGenerationRequest
                 payload["resolution"] = request.resolution
             else:
                 payload["resolution"] = "768P"
+                
+            # 添加fast_pretreatment参数
+            if hasattr(request, 'fast_pretreatment'):
+                payload["fast_pretreatment"] = request.fast_pretreatment
         
         # 发送生成请求
         async with httpx.AsyncClient(timeout=30) as client:
@@ -610,6 +653,8 @@ async def process_video_generation(task_id: str, request: VideoGenerationRequest
                        response.headers.get('Trace-ID') or 
                        response.headers.get('trace-id') or 
                        '未获取到')
+            
+            print("Trace-ID:", trace_id)
             
             # 更新任务中的trace_id
             if task_id in tasks_storage:
@@ -634,7 +679,7 @@ async def process_video_generation(task_id: str, request: VideoGenerationRequest
         start_time = time.time()
         
         while True:
-            await asyncio.sleep(20)  # 等待20秒后查询
+            await asyncio.sleep(10)  # 等待10秒后查询
             
             async with httpx.AsyncClient(timeout=30) as client:
                 status_response = await client.get(
